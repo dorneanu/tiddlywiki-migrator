@@ -16,6 +16,9 @@ TW_OUTPUT_DIR := $(WIKI_NAME)/output
 # Output directory where final markdown files will be stored.
 MARKDOWN_DIR := markdown_tiddlers
 
+# Output directory where final org files will be stored.
+ORG_DIR := org_tiddlers
+
 TIDDLYWIKI_JS := node_modules/tiddlywiki/tiddlywiki.js
 ADD_PLUGIN_JS := scripts/add-plugin.js
 SAFE_RENAME_JS := scripts/safe-rename.js
@@ -26,6 +29,7 @@ HTML_TIDDLERS := $(wildcard $(TW_OUTPUT_DIR)/*.html)
 MARKDOWN_TIDDLERS := $(patsubst $(TW_OUTPUT_DIR)/%.html, \
                                 $(MARKDOWN_DIR)/%.md, \
                                 $(HTML_TIDDLERS))
+ORG_TIDDLERS := $(patsubst $(TW_OUTPUT_DIR)/%.html, $(ORG_DIR)/%.org, $(HTML_TIDDLERS))
 
 .PHONY: export-html
 export-html : deps pre
@@ -35,6 +39,14 @@ export-html : deps pre
         --render [!is[system]] [encodeuricomponent[]addsuffix[.meta]] \
             text/plain $$:/core/templates/tiddler-metadata
 	@echo "Renaming all .html and .meta files to safe characters..."
+	$(NODEJS) $(SAFE_RENAME_JS) $(TW_OUTPUT_DIR)
+
+.PHONY: export-books
+export-books : deps pre
+	@echo "Exporting all book tiddlers from $(ORIGINAL_TIDDLYWIKI) to ORG with custom render template"
+	$(NODEJS) $(TIDDLYWIKI_JS) $(WIKI_NAME) --load $(ORIGINAL_TIDDLYWIKI) \
+        --render [!is[system]tag[Book]] [encodeuricomponent[]addprefix[books/]addsuffix[.org]] \
+        text/plain $$:/vd/templates/render-book
 	$(NODEJS) $(SAFE_RENAME_JS) $(TW_OUTPUT_DIR)
 
 .PHONY: deps
@@ -75,18 +87,35 @@ $(TIDDLYWIKI_INFO) : $(TIDDLYWIKI_JS)
 .PHONY: convert
 convert : $(MARKDOWN_DIR) $(MARKDOWN_TIDDLERS)
 
+.PHONY: convert-org
+convert-org : $(ORG_DIR) $(ORG_TIDDLERS)
+
 $(MARKDOWN_DIR) :
 	@echo "Creating folder '$(MARKDOWN_DIR)'..."
 	mkdir $(MARKDOWN_DIR)
 
 $(MARKDOWN_DIR)/%.md : $(TW_OUTPUT_DIR)/%.html
 	@echo "Generating markdown file '$(@F)'..."
-	@echo "---" > "$@"
-	@cat "$(^:html=meta)" >> "$@"
-	@echo "---" >> "$@"
-	@$(PANDOC) -f html-native_divs-native_spans -t commonmark \
-        --wrap=preserve -o - "$^" >> "$@"
+	@$(PANDOC) -f html-native_divs-native_spans -t markdown \
+        --wrap=none -o - "$^" >> "$@"
+
+$(ORG_DIR):
+	@echo "Creating folder '$(ORG_DIR)'..."
+	@echo "tiddlers: $(ORG_TIDDLERS)"
+	mkdir $(ORG_DIR)
+
+$(ORG_DIR)/%.org : $(MARKDOWN_DIR)/%.md
+	@echo "Generating ORG file '$(@F)'..."
+
+    # Add #+ to every header line
+	@cat "$(TW_OUTPUT_DIR)/`basename $^ .md`.meta" | sed -s 's/^/#+/' >> "$@"
+
+    # Insert newline after header lines
+	@echo "" >> "$@"
+
+    # Convert from markdown to org
+	@$(PANDOC) -f markdown -t org --wrap=none -o - "$^" >> "$@"
 
 .PHONY: clean
 clean :
-	rm -r $(WIKI_NAME) $(MARKDOWN_DIR)
+	rm -r $(WIKI_NAME) $(MARKDOWN_DIR) $(ORG_DIR)
